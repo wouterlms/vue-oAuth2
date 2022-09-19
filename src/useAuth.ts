@@ -38,8 +38,7 @@ const oAuth = ref<OAuth | null>(localStorage.getItem('oAuth') !== undefined
 )
 
 watch((oAuth), (oAuth) => {
-  if (oAuth !== null)
-    axios.defaults.headers.common.Authorization = `Bearer ${oAuth.accessToken}`
+  axios.defaults.headers.common.Authorization = oAuth === null ? '' : `Bearer ${oAuth.accessToken}`
 
   localStorage.setItem('oAuth', JSON.stringify(oAuth))
 }, { immediate: true })
@@ -88,7 +87,6 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
   const signOut = (): void => {
     oAuth.value = null
     user.value = null
-    axios.defaults.headers.common.Authorization = ''
   }
 
   const getUser = async (): Promise<T> => {
@@ -121,7 +119,6 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
           }
           catch (_) {
             oAuth.value = null
-            return await Promise.reject(e)
           }
         }
       }
