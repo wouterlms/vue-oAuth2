@@ -12,6 +12,7 @@ interface OAuth {
   refreshToken: string
   tokenType: string
   expiresIn: number
+  expiresAt: number
 }
 
 interface UseAuth<T> {
@@ -31,6 +32,7 @@ interface Options {
 
 const user = ref<unknown | null>(null)
 const isAuthenticated = computed(() => user.value !== null)
+let refreshTokenTimeout: ReturnType<typeof setTimeout> | null = null
 
 const oAuth = ref<OAuth | null>(localStorage.getItem('oAuth') !== undefined
   ? JSON.parse(localStorage.getItem('oAuth') as string)
@@ -39,11 +41,31 @@ const oAuth = ref<OAuth | null>(localStorage.getItem('oAuth') !== undefined
 
 watch((oAuth), (oAuth) => {
   axios.defaults.headers.common.Authorization = oAuth === null ? '' : `Bearer ${oAuth.accessToken}`
-
   localStorage.setItem('oAuth', JSON.stringify(oAuth))
 }, { immediate: true })
 
 export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => {
+  const setRefreshTokenTimeout = (): void => {
+    if (refreshTokenTimeout !== null)
+      clearTimeout(refreshTokenTimeout)
+
+    if (oAuth.value === null)
+      throw new Error('Attempted to call `setRefreshTokenTimeout()` when `oAuth` is null')
+
+    const timeoutMs = oAuth.value.expiresAt - Date.now() - 60 * 1000
+
+    if (timeoutMs > 0) {
+      refreshTokenTimeout = setTimeout(() => {
+        // eslint-disable-next-line @typescript-eslint/no-use-before-define
+        refreshToken()
+      }, timeoutMs)
+    }
+    else {
+      // eslint-disable-next-line @typescript-eslint/no-use-before-define
+      refreshToken()
+    }
+  }
+
   const signIn = async (email: string, password: string): Promise<void> => {
     const { data } = await axios({
       url: '/oauth/token',
@@ -58,7 +80,12 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
       baseURL,
     })
 
-    oAuth.value = data
+    oAuth.value = {
+      ...data,
+      expiresAt: Date.now() + data.expiresIn * 1000,
+    }
+
+    setRefreshTokenTimeout()
   }
 
   const refreshToken = async (): Promise<void> => {
@@ -74,7 +101,12 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
       baseURL,
     })
 
-    oAuth.value = data
+    oAuth.value = {
+      ...data,
+      expiresAt: Date.now() + data.expiresIn * 1000,
+    }
+
+    setRefreshTokenTimeout()
   }
 
   const invalidateToken = async (): Promise<void> => {
@@ -87,6 +119,9 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
   const signOut = (): void => {
     oAuth.value = null
     user.value = null
+
+    if (refreshTokenTimeout !== null)
+      clearTimeout(refreshTokenTimeout)
   }
 
   const getUser = async (): Promise<T> => {
@@ -125,6 +160,9 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
 
       return await Promise.reject(e)
     })
+
+  if (oAuth.value !== null)
+    setRefreshTokenTimeout()
 
   return {
     isAuthenticated,
