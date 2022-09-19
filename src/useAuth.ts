@@ -120,6 +120,7 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
             })
           }
           catch (_) {
+            oAuth.value = null
             return await Promise.reject(e)
           }
         }
