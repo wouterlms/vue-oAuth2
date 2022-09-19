@@ -46,6 +46,10 @@
     "test": "vitest",
     "typecheck": "tsc --noEmit"
   },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "vue": "^3.2.39"
+  },
   "devDependencies": {
     "@antfu/eslint-config": "^0.26.1",
     "@antfu/ni": "^0.17.2",
@@ -60,9 +64,5 @@
     "unbuild": "^0.8.8",
     "vite": "^3.0.7",
     "vitest": "^0.22.0"
-  },
-  "dependencies": {
-    "axios": "^0.27.2",
-    "vue": "^3.2.39"
   }
 }
