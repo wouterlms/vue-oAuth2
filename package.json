@@ -1,18 +1,15 @@
 {
-  "name": "pkg-name",
+  "name": "@appwise/vue-oauth2",
   "type": "module",
-  "version": "0.0.0",
-  "packageManager": "pnpm@7.12.0",
+  "version": "0.0.1",
+  "packageManager": "pnpm@7.9.0",
   "description": "",
-  "author": "Anthony Fu <anthonyfu117@hotmail.com>",
+  "author": "Wouter Laermans <wouter.laermans@appwise.be>",
   "license": "MIT",
-  "funding": "https://github.com/sponsors/antfu",
-  "homepage": "https://github.com/antfu/pkg-name#readme",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/antfu/pkg-name.git"
+    "url": "git+https://github.com/wouterlms/vue-oauth2.git"
   },
-  "bugs": "https://github.com/antfu/pkg-name/issues",
   "keywords": [],
   "sideEffects": false,
   "exports": {
@@ -36,6 +33,9 @@
   "files": [
     "dist"
   ],
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "unbuild",
     "dev": "unbuild --stub",
@@ -47,18 +47,22 @@
     "typecheck": "tsc --noEmit"
   },
   "devDependencies": {
-    "@antfu/eslint-config": "^0.27.0",
-    "@antfu/ni": "^0.18.0",
+    "@antfu/eslint-config": "^0.26.1",
+    "@antfu/ni": "^0.17.2",
     "@antfu/utils": "^0.5.2",
-    "@types/node": "^18.7.18",
+    "@types/node": "^18.7.5",
     "bumpp": "^8.2.1",
-    "eslint": "^8.23.1",
+    "eslint": "^8.22.0",
     "esno": "^0.16.3",
-    "pnpm": "^7.12.0",
+    "pnpm": "^7.9.0",
     "rimraf": "^3.0.2",
-    "typescript": "^4.8.3",
-    "unbuild": "^0.8.11",
-    "vite": "^3.1.2",
-    "vitest": "^0.23.4"
+    "typescript": "^4.7.4",
+    "unbuild": "^0.8.8",
+    "vite": "^3.0.7",
+    "vitest": "^0.22.0"
+  },
+  "dependencies": {
+    "axios": "^0.27.2",
+    "vue": "^3.2.39"
   }
 }
