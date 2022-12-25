@@ -5,6 +5,7 @@ export default defineBuildConfig({
     'src/index',
   ],
   externals: ['axios'],
+  peerDependencies: ['axios'],
   declaration: true,
   clean: true,
   rollup: {

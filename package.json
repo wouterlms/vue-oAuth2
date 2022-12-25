@@ -1,7 +1,7 @@
 {
   "name": "@appwise/vue-oauth2",
   "type": "module",
-  "version": "0.0.24",
+  "version": "1.0.0",
   "packageManager": "pnpm@7.9.0",
   "description": "oAuth2 composable for vue 3",
   "author": "Wouter Laermans <wouter.laermans@appwise.be>",

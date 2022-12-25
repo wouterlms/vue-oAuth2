@@ -1,13 +1,25 @@
-import type { ComputedRef, Ref } from 'vue'
 import { computed, ref, watch } from 'vue'
+import type { AxiosResponse } from 'axios'
 import axios, { AxiosError } from 'axios'
 
-enum GrantType {
-  PASSWORD = 'password',
-  REFRESH_TOKEN = 'refresh_token',
+import type { ComputedRef, Ref } from 'vue'
+
+export interface UseAuth<T> {
+  // Whether `user` is not `null`
+  isAuthenticated: ComputedRef<boolean>
+  // The user object
+  user: Ref<T | null>
+  // Sign in with email and password
+  signIn: (email: string, password: string) => Promise<void>
+  // Sign out, sets `user` to null and clears the `oAuth` object in localStorage
+  signOut: () => void
+  // Revoke the current access token
+  revoke: () => Promise<void>
+  // Get the user object from the API
+  getUser: () => Promise<T>
 }
 
-interface OAuth {
+export interface OAuth {
   accessToken: string
   refreshToken: string
   tokenType: string
@@ -15,24 +27,32 @@ interface OAuth {
   expiresAt: number
 }
 
-interface UseAuth<T> {
-  isAuthenticated: ComputedRef<boolean>
-  user: Ref<T | null>
-  signIn: (email: string, password: string) => Promise<void>
-  signOut: () => void
-  invalidateToken: () => Promise<void>
-  getUser: () => Promise<T>
+enum GrantType {
+  PASSWORD = 'password',
+  REFRESH_TOKEN = 'refresh_token',
 }
 
 interface Options {
   clientId: string
   clientSecret: string
   baseURL: string
+  endpoints: {
+    userInfo: string
+    revoke: string | ((accessToken: string) => string)
+  }
+  extraParams?: Record<string, string>
+  autoRefreshAccessToken?: {
+    preFetchInMs: number
+  } | boolean
+  onRefreshTokenFailed?: () => void
 }
 
 const user = ref<unknown | null>(null)
 const isAuthenticated = computed(() => user.value !== null)
+
 let refreshTokenTimeout: ReturnType<typeof setTimeout> | null = null
+let isRefreshingToken = false
+let failedRequestsQueue: Array<(accessToken: string) => Promise<AxiosResponse>> = []
 
 const oAuth = ref<OAuth | null>(localStorage.getItem('oAuth') !== undefined
   ? JSON.parse(localStorage.getItem('oAuth') as string)
@@ -40,11 +60,31 @@ const oAuth = ref<OAuth | null>(localStorage.getItem('oAuth') !== undefined
 )
 
 watch((oAuth), (oAuth) => {
-  axios.defaults.headers.common.Authorization = oAuth === null ? '' : `Bearer ${oAuth.accessToken}`
+  axios.defaults.headers.common.Authorization = oAuth === null
+    ? ''
+    : `Bearer ${oAuth.accessToken}`
+
   localStorage.setItem('oAuth', JSON.stringify(oAuth))
 }, { immediate: true })
 
-export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => {
+export default <T>(options: Options): UseAuth<T> => {
+  const {
+    clientId,
+    clientSecret,
+    baseURL,
+    endpoints,
+    extraParams,
+    autoRefreshAccessToken,
+    onRefreshTokenFailed,
+  } = options
+
+  const shouldRefreshToken = autoRefreshAccessToken === true
+    || typeof autoRefreshAccessToken === 'object'
+
+  const refreshTokenTimeoutInMs = typeof autoRefreshAccessToken === 'object'
+    ? autoRefreshAccessToken.preFetchInMs
+    : 60 * 1000
+
   const setRefreshTokenTimeout = (): void => {
     if (refreshTokenTimeout !== null)
       clearTimeout(refreshTokenTimeout)
@@ -52,13 +92,13 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
     if (oAuth.value === null)
       throw new Error('Attempted to call `setRefreshTokenTimeout()` when `oAuth` is null')
 
-    const timeoutMs = oAuth.value.expiresAt - Date.now() - 60 * 1000
+    const timeoutInMs = oAuth.value.expiresAt - Date.now() - refreshTokenTimeoutInMs
 
-    if (timeoutMs > 0) {
+    if (timeoutInMs > 0) {
       refreshTokenTimeout = setTimeout(() => {
         // eslint-disable-next-line @typescript-eslint/no-use-before-define
         refreshToken()
-      }, timeoutMs)
+      }, timeoutInMs)
     }
     else {
       // eslint-disable-next-line @typescript-eslint/no-use-before-define
@@ -68,55 +108,71 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
 
   const signIn = async (email: string, password: string): Promise<void> => {
     const { data } = await axios({
+      ...(extraParams ?? {}),
       url: '/oauth/token',
       method: 'POST',
-      data: {
+      data: new URLSearchParams({
         password,
         username: email,
-        grantType: GrantType.PASSWORD,
-        clientId,
-        clientSecret,
-      },
+        grant_type: GrantType.PASSWORD,
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
       baseURL,
     })
 
     oAuth.value = {
-      ...data,
-      expiresAt: Date.now() + data.expiresIn * 1000,
+      ...oAuth.value,
+      accessToken: data.access_token,
+      refreshToken: data.refresh_token,
+      tokenType: data.token_type,
+      expiresIn: data.expires_in,
+      expiresAt: Date.now() + data.expires_in * 1000,
     }
 
-    setRefreshTokenTimeout()
+    if (shouldRefreshToken)
+      setRefreshTokenTimeout()
   }
 
   const refreshToken = async (): Promise<void> => {
-    const { data } = await axios({
-      url: '/oauth/token',
-      method: 'POST',
-      data: {
-        grantType: GrantType.REFRESH_TOKEN,
-        clientId,
-        clientSecret,
-        refreshToken: oAuth.value?.refreshToken,
-      },
-      baseURL,
-    })
+    if (oAuth.value === null)
+      throw new Error('Not logged in')
 
-    oAuth.value = {
-      ...data,
-      expiresAt: Date.now() + data.expiresIn * 1000,
+    try {
+      const { data } = await axios({
+        ...(extraParams ?? {}),
+        url: '/oauth/token',
+        method: 'POST',
+        data: new URLSearchParams({
+          grant_type: GrantType.REFRESH_TOKEN,
+          client_id: clientId,
+          client_secret: clientSecret,
+          refresh_token: oAuth.value.refreshToken,
+        }),
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        baseURL,
+      })
+
+      oAuth.value = {
+        ...oAuth.value,
+        accessToken: data.access_token,
+        refreshToken: data.refresh_token,
+        tokenType: data.token_type,
+        expiresIn: data.expires_in,
+        expiresAt: Date.now() + data.expires_in * 1000,
+      }
+
+      if (shouldRefreshToken)
+        setRefreshTokenTimeout()
     }
-
-    setRefreshTokenTimeout()
+    catch {
+      oAuth.value = null
+      onRefreshTokenFailed?.()
+    }
   }
 
-  const invalidateToken = async (): Promise<void> => {
-    await axios({
-      url: `/oauth/invalidate?token=${oAuth.value?.accessToken as string}`,
-      baseURL,
-    })
-  }
-
-  const signOut = (): void => {
+  const signOut = () => {
     oAuth.value = null
     user.value = null
 
@@ -124,52 +180,83 @@ export default <T>({ baseURL, clientId, clientSecret }: Options): UseAuth<T> => 
       clearTimeout(refreshTokenTimeout)
   }
 
+  const revoke = async () => {
+    if (oAuth.value === null)
+      throw new Error('Not logged in')
+
+    const { revoke: revokeEndpoint } = endpoints
+
+    const endpoint = typeof revokeEndpoint === 'function'
+      ? revokeEndpoint(oAuth.value.accessToken)
+      : revokeEndpoint
+
+    await axios.post(endpoint)
+  }
+
   const getUser = async (): Promise<T> => {
     if (oAuth.value === null)
       throw new Error('Not logged in')
 
-    const { data } = await axios.get('/users/me')
+    const { data } = await axios.get(endpoints.userInfo, {
+      baseURL,
+    })
 
     user.value = data
 
     return data
   }
 
+  const processQueue = async (accessToken: string): Promise<void> => {
+    failedRequestsQueue.forEach(request => request(accessToken))
+  }
+
   axios.interceptors.response.use(
-    r => r,
-    async (e) => {
-      if (e instanceof AxiosError) {
-        const status = e.response?.status ?? null
+    req => req,
+    async (err) => {
+      if (!(err instanceof AxiosError))
+        return await Promise.reject(err)
 
-        if (status === 401 && oAuth.value !== null) {
-          try {
-            await refreshToken()
+      const status = err.response?.status ?? null
+      const url = err.config?.url ?? null
 
-            return await axios.request({
-              ...e.config,
-              headers: {
-                Authorization: `Bearer ${oAuth.value.accessToken}`,
-              },
-            })
-          }
-          catch (_) {
-            oAuth.value = null
-          }
+      if (status !== 401 || oAuth.value === null || url === '/oauth/token')
+        return await Promise.reject(err)
+
+      const originalHeaders = err.config?.headers ?? {}
+
+      failedRequestsQueue.push((accessToken: string) => axios.request({
+        ...err.config,
+        headers: {
+          ...originalHeaders,
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }))
+
+      if (!isRefreshingToken) {
+        isRefreshingToken = true
+
+        try {
+          await refreshToken()
+          await processQueue(oAuth.value.accessToken)
         }
+        catch {}
+
+        failedRequestsQueue = []
+        isRefreshingToken = false
       }
 
-      return await Promise.reject(e)
+      return await Promise.reject(err)
     })
 
-  if (oAuth.value !== null)
+  if (oAuth.value !== null && shouldRefreshToken)
     setRefreshTokenTimeout()
 
   return {
-    isAuthenticated,
     user: user as Ref<T | null>,
+    isAuthenticated,
     signIn,
     signOut,
-    invalidateToken,
+    revoke,
     getUser,
   }
 }
